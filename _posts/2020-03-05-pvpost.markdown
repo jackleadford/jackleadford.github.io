@@ -181,8 +181,7 @@ kubectl exec -it task-pv-pod -n default /bin/bash
 ~~~
 
 ~~~
-cd
-/hostlogs/pods/default_task-pv-pod_c9030cba-f67b-4564-8bbc-531d87e63920/task-pv-container/
+cd /hostlogs/pods/default_task-pv-pod_c9030cba-f67b-4564-8bbc-531d87e63920/task-pv-container/
 ~~~
 
 ~~~
