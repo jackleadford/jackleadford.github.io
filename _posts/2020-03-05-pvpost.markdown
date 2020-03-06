@@ -1,0 +1,20 @@
+---
+layout: post
+title:  "Dangers of HostPath PersistentVolumes"
+date:   2020-03-05 20:12:50 -0800
+categories: containers
+---
+
+## Background and Problem Statement
+
+In, Kubernetes a `PersistentVolume` object is an API
+object that represents a Volume (some kind of mount),
+which can make it easier for operators to keep track
+of the Volume:
+
+| ![pvdocs](/assets/images/pvdocs.png) | 
+|:--:| 
+| <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#introduction> |
+
+
+## Fix?
