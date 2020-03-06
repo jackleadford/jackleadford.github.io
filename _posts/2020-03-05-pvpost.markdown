@@ -47,7 +47,7 @@ can access the Node's home directory, despite the PSP that is in place.
 
 Kubernetes reponded in turn and added the following language to the documentation:
 
-| ![pvorigwarning](assets/images/pvorigwarning.png) | 
+| ![pvorigwarning](/assets/images/pvorigwarning.png) | 
 |:--:| 
 | <https://github.com/kubernetes/website/pull/15756> |
 
@@ -59,7 +59,7 @@ filesystem. You should read the writeup, but this occurs because said Pod can ov
 
 This is somewhat of a contrived example, but Kubernetes is weary of such trickery, and so they have declared any writeable `hostPath` Volume insecure:
 
-| ![pvorigwarning](assets/images/readfswarning.png) | 
+| ![pvorigwarning](/assets/images/readfswarning.png) | 
 |:--:| 
 | <https://kubernetes.io/docs/concepts/policy/pod-security-policy/#volumes-and-file-systems> |
 
@@ -70,7 +70,7 @@ objects! And while `PersistentVolume` objects have an `accessModes` directive, s
 modes is determined by the implementation of the underlying storage, and a read-only mode is not supported for
 `HostPath` type `PersistentVolumes`:
 
-| ![pvorigwarning](assets/images/pvaccessmodesupport.png) | 
+| ![pvorigwarning](/assets/images/pvaccessmodesupport.png) | 
 |:--:| 
 | <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistent-volumes> |
 
@@ -212,7 +212,7 @@ To address this, Kubernetes is doing two things:
 * Updating the documentation's language to state that `HostPath` type `PersistentVolume` objects
 cannot be made read-only, which, as we know, is insecure by design
 
-| ![newdocwarning](assets/images/newdocwarning.png) | 
+| ![newdocwarning](/assets/images/newdocwarning.png) | 
 |:--:| 
 | <https://github.com/kubernetes/website/pull/19504/> |
 
