@@ -5,6 +5,13 @@ date:   2020-03-05 20:12:50 -0800
 categories: containers
 ---
 
+## Intro
+
+In this post we'll talk about some dangers that arise
+when using a specific type of Kubernetes storage object, 
+which cannot be secured by operators and can result in
+Pod escapes.
+
 ## Background
 
 In Kubernetes, a `PersistentVolume` object is an API
@@ -27,13 +34,13 @@ its namespace:
 | <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#claims-as-volumes> |
 
 
-A `PersistentVolume` object can define the [same types](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#types-of-persistent-volumes) of Volumes you are
-used to using inline within a Pod's YAML spec, such as `HostPath`.
+A `PersistentVolume` object can define the [same types](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#types-of-persistent-volumes) of Volumes commonly defined
+inline within a Pod's YAML spec, such as `HostPath`.
 
 ## Problem Statement
 
 Trail of Bits noted in their Kubernetes audit that `HostPath` type `PersistentVolume`
-objects *are not* check against the [`hostPath`-relevant directives](https://kubernetes.io/docs/concepts/policy/pod-security-policy/#volumes-and-file-systems) in a user's Pod Security Policy (PSP):
+objects *are not* checked against the [`hostPath`-relevant directives](https://kubernetes.io/docs/concepts/policy/pod-security-policy/#volumes-and-file-systems) in a user's Pod Security Policy (PSP):
 
 | ![tobpvbug](/assets/images/tobpvbug.png) | 
 |:--:| 
@@ -81,14 +88,14 @@ logs, and they choose to represent this as a `HostPath` type `PersistentVolume`.
 
 * The operator reads the aforementioned warning in the PSP documentation, and thus sets `readOnly: true` in `allowedHostPaths` for the `PersistentVolume`, assuming this makes the mount read-only, [as it does for inline `hostPath` Volumes](https://github.com/kubernetes/kubernetes/pull/58647).
 
-* Since the Pod can actually write to `/var/log`, the Pod receiving this Volume mount can follow the steps in Aqua's writeup. By writing a symlink to a Pod's logfile, they can read *any* file off of the Node's filesystem, not just what is in `/var/log`/.
+* Since the Pod can actually write to `/var/log`, the Pod receiving this Volume mount can follow the steps in Aqua's writeup. By writing a symlink to a Pod's logfile, they can read *any* file off of the Node's filesystem, not just what is in `/var/log/`.
 
 **Minikube Example**
 
 Here are some example Kubernetes objects and steps that can be used to reproduce the
 exploit scenario above:
 
-1. Reads the docs, and sets `readOnly: true` in a PSP for `hostPath`
+* Reads the docs, and sets `readOnly: true` in a PSP for `hostPath`
 Volumes, in order to prevent attacks surrounding writing and symlinks;
 the operator wants a Pod with read-only access to other Pods' logs.
 
@@ -121,7 +128,7 @@ spec:
    - nfs
 ~~~
 
-2. creates a `PersistentVolume` of type `HostPath`, which allows a Pod to
+* Creates a `PersistentVolume` of type `HostPath`, which allows a Pod to
 access `/var/log`, under the assumption it is read-only via the PSP
 directive
 
@@ -154,7 +161,7 @@ spec:
         storage: 3Gi
 ~~~
 
-3. but a Pod can still write a symlink to its `0.log` file, which is
+* But a Pod can still write a symlink to its `0.log` file, which is
 followed by the Node upon `kubectl logs PODNAME` in order to read *any* file from the Node
 
 ~~~
@@ -206,7 +213,8 @@ be considered suspect because they cannot be made read-only**. While the `/var/l
 is the only one I know of, there might be more, which is why the documentation warns about
 writable `hostPath` Volumes in the first place.
 
-To address this, Kubernetes is doing two things:
+I reported this behavior to Kubernetes, and, to address this, 
+Kubernetes is doing two things:
 
 * Updating the documentation's language to state that `HostPath` type `PersistentVolume` objects
 cannot be made read-only, which, as we know, is insecure by design
