@@ -74,8 +74,7 @@ But note their prescribed fix in the figure above: use the `readOnly: true` sub-
 `allowedHostPaths` directive in a user's PSP in order to make `hostPath` Volumes read-only, and thus safe.
 But wait! As we discussed earlier, those directives are not checked for `HostPath` type `PersistentVolume`
 objects! And while `PersistentVolume` objects have an `accessModes` directive, support for individual access
-modes is determined by the implementation of the underlying storage, and a read-only mode is not supported for
-`HostPath` type `PersistentVolumes`:
+modes is determined by the implementation of the underlying storage, and a read-only `accessMode` is not supported for `HostPath` type `PersistentVolumes`:
 
 | ![pvorigwarning](/assets/images/pvaccessmodesupport.png) | 
 |:--:| 
