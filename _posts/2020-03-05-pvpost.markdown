@@ -15,7 +15,7 @@ Pod escapes.
 ## Background
 
 In Kubernetes, a `PersistentVolume` object is an API
-object that represents a Volume (some kind of mount),
+object that represents a Volume (some kind of mount for a Pod),
 which can make it easier for operators to keep track
 of the Volume. A "share" of a `PersistentVolume` can
 be claimed by a Pod via a `PersistentVolumeClaim` object:
@@ -60,7 +60,7 @@ Kubernetes reponded in turn and added the following language to the documentatio
 
 However, **there is an additional angle to build on here**. 
 
-It is known that writable `hostPath` Volumes are insecure, and Aqua has a [fantastic writeup](https://blog.aquasec.com/kubernetes-security-pod-escape-log-mounts) on *one such* example of why this is the case. In Aqua's writeup, they
+It is known that *writable* `hostPath` Volumes are insecure, and Aqua has a [fantastic writeup](https://blog.aquasec.com/kubernetes-security-pod-escape-log-mounts) on *one such* example of why this is the case. In Aqua's writeup, they
 demonstrate how a Pod that receives a writable `hostPath` Volume of `/var/log` can access *any* files on the Node's
 filesystem. You should read the writeup, but this occurs because said Pod can overwrite its (or any other Pod's) `0.log` logfile with a symlink to e.g. `/etc/shadow`, and this symlink is followed by the Node upon any `kubectl logs PODNAME` invocation for the Pod whose logfile has been poisoned!
 
@@ -74,7 +74,7 @@ But note their prescribed fix in the figure above: use the `readOnly: true` sub-
 `allowedHostPaths` directive in a user's PSP in order to make `hostPath` Volumes read-only, and thus safe.
 But wait! As we discussed earlier, those directives are not checked for `HostPath` type `PersistentVolume`
 objects! And while `PersistentVolume` objects have an `accessModes` directive, support for individual access
-modes is determined by the implementation of the underlying storage, and a read-only `accessMode` is not supported for `HostPath` type `PersistentVolumes`:
+modes is determined by the implementation of the underlying storage driver, and a read-only `accessMode` is not supported for `HostPath` type `PersistentVolumes`:
 
 | ![pvorigwarning](/assets/images/pvaccessmodesupport.png) | 
 |:--:| 
@@ -82,7 +82,7 @@ modes is determined by the implementation of the underlying storage, and a read-
 
 **Exploit Scenario:**
 
-An operator wishes to provide a read-only copy of the Node's `/var/log`, such that a Pod can view other Pods'
+An operator wishes to provide a Pod with a read-only copy of the Node's `/var/log`, such that the Pod can view other Pods'
 logs, and they choose to represent this as a `HostPath` type `PersistentVolume`.
 
 * The operator reads the aforementioned warning in the PSP documentation, and thus sets `readOnly: true` in `allowedHostPaths` for the `PersistentVolume`, assuming this makes the mount read-only, [as it does for inline `hostPath` Volumes](https://github.com/kubernetes/kubernetes/pull/58647).
@@ -129,7 +129,7 @@ spec:
 
 * Creates a `PersistentVolume` of type `HostPath`, which allows a Pod to
 access `/var/log`, under the assumption it is read-only via the PSP
-directive
+directive (that is not checked for `HostPath` Volumes defined by `PersistentVolume` objects)
 
 ~~~
 apiVersion: v1
